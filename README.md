@@ -1,4 +1,4 @@
-# Overlapping_shiny
+# OverlapInsight
 
 # Distribution Overlapping Visualizer
 
