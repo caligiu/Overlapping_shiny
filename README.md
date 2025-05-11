@@ -1,4 +1,4 @@
-# OverlapInsight
+# Overlapp.Insight
 
 # Distribution Overlapping Visualizer
 
