@@ -12,8 +12,15 @@
 - View results in both **tabular** and **matrix** formats.
 - Real-time **progress bar** during computation.
 - **Error handling** and UI feedback using `shinyjs`.
-
+  
 ## Getting Started
+## Example Dataset
+
+An example CSV file is included in the [`example-data/`](example-data/) folder:
+
+[overlapp_insight_example_data.csv](example-data/overlapp_insight_example_data.csv)
+
+This dataset contains simulated values for several sign language distributions, intended for testing the app's functionality.
 
 ### Prerequisites
 
