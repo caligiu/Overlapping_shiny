@@ -1,0 +1,153 @@
+# Load libraries
+library(shiny)
+library(ggplot2)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(overlapping)
+library(shinyjs)
+
+# Define UI
+ui <- fluidPage(
+  useShinyjs(),  # Enable shinyjs
+  
+  titlePanel("Distribution Overlapping Visualizer"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      fileInput("file", "Upload CSV File", accept = ".csv"),
+      uiOutput("var_select"),
+      numericInput("B", "Number of Permutations (B)", value = 2000, min = 100, step = 100),
+      actionButton("compute", "Compute Overlapping"),
+      actionButton("clear", "Clear Results"),
+      br(), br(),
+      hidden(div(id = "loading_msg", strong("Computing, please wait...")))
+    ),
+    
+    mainPanel(
+      plotOutput("densityPlot"),
+      h4("Pairwise Overlapping Table with p-values"),
+      tableOutput("overlapTable"),
+      h4("Overlapping Matrix"),
+      tableOutput("overlapMatrix")
+    )
+  )
+)
+
+# Define Server
+server <- function(input, output, session) {
+  
+  # Reactive: Read and clean uploaded data
+  data <- reactive({
+    req(input$file)
+    df <- read_csv(input$file$datapath, col_types = cols(.default = col_double()))
+    df <- df %>% mutate(across(everything(), as.numeric)) %>% drop_na()
+    return(df)
+  })
+  
+  # UI for selecting variables
+  output$var_select <- renderUI({
+    req(data())
+    colnames <- names(data())
+    selectInput("selected_vars", "Select Distributions to Compare", 
+                choices = colnames, multiple = TRUE, 
+                selected = colnames[1:min(2, length(colnames))])
+  })
+  
+  # Core computation with progress and error handling
+  observeEvent(input$compute, {
+    shinyjs::disable("compute")
+    shinyjs::disable("clear")
+    
+    tryCatch({
+      df <- data()
+      selected_vars <- input$selected_vars
+      B <- input$B
+      
+      if (length(selected_vars) < 2) {
+        showNotification("Please select at least two distributions to compare.", type = "error")
+        return(NULL)
+      }
+      
+      selected_data <- df[, selected_vars, drop = FALSE]
+      combn_names <- combn(selected_vars, 2, simplify = FALSE)
+      
+      n_pairs <- length(combn_names)
+      progress <- shiny::Progress$new()
+      on.exit(progress$close())
+      progress$set(message = "Computing overlap and permutations...", value = 0)
+      
+      overlap_list <- list()
+      for (i in seq_along(combn_names)) {
+        pair <- combn_names[[i]]
+        values <- list(selected_data[[pair[1]]], selected_data[[pair[2]]])
+        ov <- overlap(values)
+        perm <- perm.test(values, B = B)
+        overlap_list[[i]] <- data.frame(
+          Distribution_1 = pair[1],
+          Distribution_2 = pair[2],
+          Overlap_Index = round(ov$OV, 3),
+          Z_Observed = round(perm$Zobs, 3),
+          P_Value = signif(perm$pval, 3)
+        )
+        progress$set(value = i / n_pairs)
+      }
+      
+      overlap_table <- bind_rows(overlap_list)
+      
+      output$overlapTable <- renderTable({
+        overlap_table
+      })
+      
+      # Matrix-style overlapping table
+      dist_names <- colnames(selected_data)
+      ov_matrix <- matrix(NA, nrow = length(dist_names), ncol = length(dist_names),
+                          dimnames = list(dist_names, dist_names))
+      
+      for (i in seq_along(dist_names)) {
+        for (j in seq_along(dist_names)) {
+          if (i == j) {
+            ov_matrix[i, j] <- 1
+          } else {
+            ov <- overlap(list(selected_data[[i]], selected_data[[j]]))$OV
+            ov_matrix[i, j] <- round(ov, 3)
+          }
+        }
+      }
+      
+      output$overlapMatrix <- renderTable({
+        as.data.frame(ov_matrix)
+      })
+      
+      # Density Plot
+      data_long <- selected_data %>%
+        pivot_longer(cols = everything(), names_to = "Distribution", values_to = "Value")
+      
+      output$densityPlot <- renderPlot({
+        ggplot(data_long, aes(x = Value, fill = Distribution)) +
+          geom_density(alpha = 0.4) +
+          xlim(0, 15) +
+          theme_minimal() +
+          labs(title = "Density Plot of Selected Distributions",
+               x = "Values", y = "Density") +
+          scale_fill_brewer(palette = "Set1")
+      })
+      
+    }, error = function(e) {
+      showNotification(paste("Errore:", e$message), type = "error")
+    }, finally = {
+      shinyjs::enable("compute")
+      shinyjs::enable("clear")
+    })
+  })
+  
+  # Clear button functionality
+  observeEvent(input$clear, {
+    output$overlapTable <- renderTable({ NULL })
+    output$overlapMatrix <- renderTable({ NULL })
+    output$densityPlot <- renderPlot({ NULL })
+  })
+}
+
+# Run App
+shinyApp(ui = ui, server = server)
